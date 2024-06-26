@@ -123,7 +123,7 @@ func goFun(postContent string, Referer string, XforwardFor bool, customIP ipArra
 
 var h = flag.Bool("h", false, "this help")
 var count = flag.Int("c", 16, "concurrent thread for download,default 16")
-var url = flag.String("s", "http://speedtest4.tele2.net/1GB.zip", "target url")
+var url = flag.String("s", "", "target url")
 var postContent = flag.String("p", "", "post content")
 var referer = flag.String("r", "", "referer url")
 var detectLocation = flag.Bool("d", false, "detect Real link from the Location in http header")
