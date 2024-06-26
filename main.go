@@ -32,7 +32,7 @@ import (
 
 const (
 	letterIdxBits = 6
-	letterIdxMask = 1 << letterIdxBits - 1
+	letterIdxMask = 1<<letterIdxBits - 1
 	letterIdxMax  = 63 / letterIdxBits
 )
 
@@ -45,7 +45,6 @@ const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 var SpeedQueue = list.New()
 var SpeedIndex uint64 = 0
-
 
 type header struct {
 	key, value string
@@ -131,11 +130,11 @@ func LeastSquares(x []float64, y []float64) (a float64, b float64) {
 func showStat() {
 	initialNetCounter, _ := netstat.IOCounters(true)
 	iplist := ""
-	if customIP !=nil && len(customIP)>0{
+	if customIP != nil && len(customIP) > 0 {
 		iplist = customIP.String()
-	}else{
+	} else {
 		u, _ := URL.Parse(*url)
-		iplist = strings.Join(nslookup(u.Hostname(),"8.8.8.8"),",")
+		iplist = strings.Join(nslookup(u.Hostname(), "8.8.8.8"), ",")
 	}
 
 	for true {
@@ -144,7 +143,7 @@ func showStat() {
 		netCounter, _ := netstat.IOCounters(true)
 		loadStat, _ := load.Avg()
 
-		fmt.Fprintf(TerminalWriter, "URL:%s\n", *url)
+		fmt.Fprintf(TerminalWriter, "URL:%s\n", TargetUrl)
 		fmt.Fprintf(TerminalWriter, "IP:%s\n", iplist)
 
 		fmt.Fprintf(TerminalWriter, "CPU:%.3f%% \n", percent)
@@ -229,10 +228,45 @@ func nslookup(targetAddress, server string) (res []string) {
 	return
 }
 
-func goFun(Url string, postContent string, Referer string, XforwardFor bool, customIP ipArray, wg *sync.WaitGroup) {
+func GetHttpLocation(Url string) string {
+	resp, err := http.Get(Url)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Headers for", url)
+
+	locationHeader := resp.Request.Response.Header["Location"][0]
+	if len(locationHeader) > 0 {
+		return locationHeader
+	}
+	return ""
+}
+
+func RefreshHttpLocation(Url string) string {
 	defer func() {
 		if r := recover(); r != nil {
-			go goFun(Url, postContent, Referer, XforwardFor, customIP, wg)
+			go RefreshHttpLocation(*url)
+		}
+	}()
+
+	for {
+		time.Sleep(60 * time.Second)
+		location := GetHttpLocation(Url)
+		if len(location) > 0 {
+			TargetUrl = location
+		} else {
+			TargetUrl = *url
+		}
+	}
+}
+
+func goFun(postContent string, Referer string, XforwardFor bool, customIP ipArray, wg *sync.WaitGroup) {
+	defer func() {
+		if r := recover(); r != nil {
+			go goFun(postContent, Referer, XforwardFor, customIP, wg)
 		}
 	}()
 
@@ -276,18 +310,18 @@ func goFun(Url string, postContent string, Referer string, XforwardFor bool, cus
 		var err1 error = nil
 		client := &http.Client{
 			Transport: transport,
-			Timeout: time.Second*10,
+			Timeout:   time.Second * 10,
 		}
 		if len(postContent) > 0 {
-			request, err1 = http.NewRequest("POST", Url, strings.NewReader(postContent))
+			request, err1 = http.NewRequest("POST", TargetUrl, strings.NewReader(postContent))
 		} else {
-			request, err1 = http.NewRequest("GET", Url, nil)
+			request, err1 = http.NewRequest("GET", TargetUrl, nil)
 		}
 		if err1 != nil {
 			continue
 		}
 		if len(Referer) == 0 {
-			Referer = Url
+			Referer = TargetUrl
 		}
 		request.Header.Add("Cookie", RandStringBytesMaskImpr(12))
 		request.Header.Add("User-Agent", browser.Random())
@@ -298,19 +332,19 @@ func goFun(Url string, postContent string, Referer string, XforwardFor bool, cus
 			request.Header.Add("X-Real-IP", randomip)
 		}
 
-		if len(headers)>0 {
+		if len(headers) > 0 {
 			for _, head := range headers {
 				headKey := head.key
 				headValue := head.value
-				if strings.HasPrefix(head.key,"Random") {
+				if strings.HasPrefix(head.key, "Random") {
 					count, convErr := strconv.Atoi(strings.ReplaceAll(head.value, "Random", ""))
-					if convErr==nil {
+					if convErr == nil {
 						headKey = RandStringBytesMaskImpr(count)
 					}
 				}
-				if strings.HasPrefix(head.value,"Random"){
+				if strings.HasPrefix(head.value, "Random") {
 					count, convErr := strconv.Atoi(strings.ReplaceAll(head.value, "Random", ""))
-					if convErr==nil {
+					if convErr == nil {
 						headValue = RandStringBytesMaskImpr(count)
 					}
 				}
@@ -325,30 +359,32 @@ func goFun(Url string, postContent string, Referer string, XforwardFor bool, cus
 		}
 		io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
-
 	}
 	wg.Done()
 }
+
 var h = flag.Bool("h", false, "this help")
 var count = flag.Int("c", 16, "concurrent thread for download,default 16")
 var url = flag.String("s", "http://speedtest4.tele2.net/1GB.zip", "target url")
 var postContent = flag.String("p", "", "post content")
 var referer = flag.String("r", "", "referer url")
+var detectLocation = flag.Bool("d", true, "detect Real link from the Location in http header")
 var xforwardfor = flag.Bool("f", true, "randomized X-Forwarded-For and X-Real-IP address")
 var TerminalWriter = goterminal.New(os.Stdout)
 var customIP ipArray
 var headers headersList
+var TargetUrl string
 
 func usage() {
 	fmt.Fprintf(os.Stderr,
-`webBenchmark version: /0.6
+		`webBenchmark version: /0.6
 Usage: webBenchmark [-c concurrent] [-s target] [-p] [-r refererUrl] [-f] [-i ip]
 
 Options:
 `)
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr,
-`
+		`
 Advanced Example:
 webBenchmark -c 16 -s https://some.website -r https://referer.url -i 10.0.0.1 -i 10.0.0.2 
 	16 concurrent to benchmark https://some.website with https://referer.url directly to ip 10.0.0.1 and 10.0.0.2
@@ -369,8 +405,21 @@ func main() {
 	}
 	routines := *count
 
-	if customIP != nil && len(customIP) > 0 && routines < len(customIP){
+	if customIP != nil && len(customIP) > 0 && routines < len(customIP) {
 		routines = len(customIP)
+	}
+
+	if *detectLocation {
+		location := GetHttpLocation(*url)
+		if len(location) > 0 {
+			TargetUrl = location
+		} else {
+			TargetUrl = *url
+		}
+
+		go RefreshHttpLocation(*url)
+	} else {
+		TargetUrl = *url
 	}
 
 	go showStat()
@@ -378,9 +427,10 @@ func main() {
 	if routines <= 0 {
 		routines = 16
 	}
+
 	for i := 0; i < routines; i++ {
 		waitgroup.Add(1)
-		go goFun(*url, *postContent, *referer, *xforwardfor, customIP, &waitgroup)
+		go goFun(*postContent, *referer, *xforwardfor, customIP, &waitgroup)
 	}
 	waitgroup.Wait()
 	TerminalWriter.Reset()
