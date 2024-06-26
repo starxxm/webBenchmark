@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/list"
 	"context"
 	"crypto/tls"
 	"flag"
@@ -9,7 +8,6 @@ import (
 	"github.com/EDDYCJY/fake-useragent"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -18,250 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"net"
 
-	URL "net/url"
-
 	"github.com/apoorvam/goterminal"
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/load"
-	"github.com/shirou/gopsutil/mem"
-	netstat "github.com/shirou/gopsutil/net"
 )
-
-const (
-	letterIdxBits = 6
-	letterIdxMask = 1<<letterIdxBits - 1
-	letterIdxMax  = 63 / letterIdxBits
-)
-
-type speedPair struct {
-	index uint64
-	speed float64
-}
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-var SpeedQueue = list.New()
-var SpeedIndex uint64 = 0
-
-type header struct {
-	key, value string
-}
-
-type headersList []header
-
-func (h *headersList) String() string {
-	return fmt.Sprint(*h)
-}
-
-func (h *headersList) IsCumulative() bool {
-	return true
-}
-
-func (h *headersList) Set(value string) error {
-	res := strings.SplitN(value, ":", 2)
-	if len(res) != 2 {
-		return nil
-	}
-	*h = append(*h, header{
-		res[0], strings.Trim(res[1], " "),
-	})
-	return nil
-}
-
-type ipArray []string
-
-func (i *ipArray) String() string {
-	return strings.Join(*i, ",")
-}
-
-func (i *ipArray) Set(value string) (err error) {
-	*i = append(*i, strings.TrimSpace(value))
-	return nil
-}
-
-func RandStringBytesMaskImpr(n int) string {
-	b := make([]byte, n)
-	for i, cache, remain := n-1, rand.Int63(), letterIdxMax; i >= 0; {
-		if remain == 0 {
-			cache, remain = rand.Int63(), letterIdxMax
-		}
-		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
-			b[i] = letterBytes[idx]
-			i--
-		}
-		cache >>= letterIdxBits
-		remain--
-	}
-	return string(b)
-}
-
-func generateRandomIPAddress() string {
-	rand.Seed(time.Now().Unix())
-	ip := fmt.Sprintf("%d.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(255), rand.Intn(255))
-	return ip
-}
-
-func LeastSquares(x []float64, y []float64) (a float64, b float64) {
-	xi := float64(0)
-	x2 := float64(0)
-	yi := float64(0)
-	xy := float64(0)
-	if len(x) != len(y) {
-		a = 0
-		b = 0
-		return
-	} else {
-		length := float64(len(x))
-		for i := 0; i < len(x); i++ {
-			xi += x[i]
-			x2 += x[i] * x[i]
-			yi += y[i]
-			xy += x[i] * y[i]
-		}
-		a = (yi*xi - xy*length) / (xi*xi - x2*length)
-		b = (yi*x2 - xy*xi) / (x2*length - xi*xi)
-	}
-	return
-}
-
-func showStat() {
-	initialNetCounter, _ := netstat.IOCounters(true)
-	iplist := ""
-	if customIP != nil && len(customIP) > 0 {
-		iplist = customIP.String()
-	} else {
-		u, _ := URL.Parse(*url)
-		iplist = strings.Join(nslookup(u.Hostname(), "8.8.8.8"), ",")
-	}
-
-	for true {
-		percent, _ := cpu.Percent(time.Second, false)
-		memStat, _ := mem.VirtualMemory()
-		netCounter, _ := netstat.IOCounters(true)
-		loadStat, _ := load.Avg()
-
-		fmt.Fprintf(TerminalWriter, "URL:%s\n", TargetUrl)
-		fmt.Fprintf(TerminalWriter, "IP:%s\n", iplist)
-
-		fmt.Fprintf(TerminalWriter, "CPU:%.3f%% \n", percent)
-		fmt.Fprintf(TerminalWriter, "Memory:%.3f%% \n", memStat.UsedPercent)
-		fmt.Fprintf(TerminalWriter, "Load:%.3f %.3f %.3f\n", loadStat.Load1, loadStat.Load5, loadStat.Load15)
-		for i := 0; i < len(netCounter); i++ {
-			if netCounter[i].BytesRecv == 0 && netCounter[i].BytesSent == 0 {
-				continue
-			}
-			RecvBytes := float64(netCounter[i].BytesRecv - initialNetCounter[i].BytesRecv)
-			SendBytes := float64(netCounter[i].BytesSent - initialNetCounter[i].BytesSent)
-			//if RecvBytes > 1000 {
-			//	SpeedIndex++
-			//	pair := speedPair{
-			//		index: SpeedIndex,
-			//		speed: RecvBytes,
-			//	}
-			//	SpeedQueue.PushBack(pair)
-			//	if SpeedQueue.Len() > 60 {
-			//		SpeedQueue.Remove(SpeedQueue.Front())
-			//	}
-			//	var x []float64
-			//	var y []float64
-			//	x = make([]float64, 60)
-			//	y = make([]float64, 60)
-			//	var point = 0
-			//	for item := SpeedQueue.Front(); item != nil; item = item.Next() {
-			//		spdPair := item.Value.(speedPair)
-			//		x[point] = float64(spdPair.index)
-			//		y[point] = spdPair.speed
-			//		point++
-			//	}
-			//	_, b := LeastSquares(x, y)
-			//	log.Printf("Speed Vertical:%.3f\n", b)
-			//}
-			fmt.Fprintf(TerminalWriter, "Nic:%v,Recv %s(%s/s),Send %s(%s/s)\n", netCounter[i].Name,
-				readableBytes(float64(netCounter[i].BytesRecv)),
-				readableBytes(RecvBytes),
-				readableBytes(float64(netCounter[i].BytesSent)),
-				readableBytes(SendBytes))
-		}
-		initialNetCounter = netCounter
-		TerminalWriter.Clear()
-		TerminalWriter.Print()
-		time.Sleep(1 * time.Millisecond)
-	}
-}
-
-func readableBytes(bytes float64) (expression string) {
-	if bytes == 0 {
-		return "0B"
-	}
-	var i = math.Floor(math.Log(bytes) / math.Log(1024))
-	var sizes = []string{"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
-	return fmt.Sprintf("%.3f%s", bytes/math.Pow(1024, i), sizes[int(i)])
-}
-
-func nslookup(targetAddress, server string) (res []string) {
-	if server == "" {
-		server = "8.8.8.8"
-	}
-	c := dns.Client{}
-	m := dns.Msg{}
-	m.SetQuestion(targetAddress+".", dns.TypeA)
-
-	ns := server + ":53"
-	r, t, err := c.Exchange(&m, ns)
-	if err != nil {
-		fmt.Printf("nameserver %s error: %v\n", ns, err)
-		return res
-	}
-	fmt.Printf("nameserver %s took %v", ns, t)
-	if len(r.Answer) == 0 {
-		return res
-	}
-	for _, ans := range r.Answer {
-		if ans.Header().Rrtype == dns.TypeA {
-			Arecord := ans.(*dns.A)
-			res = append(res, fmt.Sprintf("%s", Arecord))
-		}
-	}
-	return
-}
-
-func GetHttpLocation(Url string) string {
-	resp, err := http.Get(Url)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	fmt.Println("Headers for", url)
-
-	locationHeader := resp.Request.Response.Header["Location"][0]
-	if len(locationHeader) > 0 {
-		return locationHeader
-	}
-	return ""
-}
-
-func RefreshHttpLocation(Url string) string {
-	defer func() {
-		if r := recover(); r != nil {
-			go RefreshHttpLocation(*url)
-		}
-	}()
-
-	for {
-		time.Sleep(60 * time.Second)
-		location := GetHttpLocation(Url)
-		if len(location) > 0 {
-			TargetUrl = location
-		} else {
-			TargetUrl = *url
-		}
-	}
-}
 
 func goFun(postContent string, Referer string, XforwardFor bool, customIP ipArray, wg *sync.WaitGroup) {
 	defer func() {
@@ -368,8 +126,9 @@ var count = flag.Int("c", 16, "concurrent thread for download,default 16")
 var url = flag.String("s", "http://speedtest4.tele2.net/1GB.zip", "target url")
 var postContent = flag.String("p", "", "post content")
 var referer = flag.String("r", "", "referer url")
-var detectLocation = flag.Bool("d", true, "detect Real link from the Location in http header")
+var detectLocation = flag.Bool("d", false, "detect Real link from the Location in http header")
 var xforwardfor = flag.Bool("f", true, "randomized X-Forwarded-For and X-Real-IP address")
+var subscribe = flag.String("sub", "", "subscribe url")
 var TerminalWriter = goterminal.New(os.Stdout)
 var customIP ipArray
 var headers headersList
@@ -397,6 +156,7 @@ webBenchmark -c 16 -s https://some.website -r https://referer.url
 func main() {
 	flag.Var(&customIP, "i", "custom ip address for that domain, multiple addresses automatically will be assigned randomly")
 	flag.Var(&headers, "H", "custom header")
+	//flag.BoolVar(&detectLocation, "d", true, "detect Real link from the Location in http header")
 	flag.Usage = usage
 	flag.Parse()
 	if *h {
@@ -408,8 +168,23 @@ func main() {
 	if customIP != nil && len(customIP) > 0 && routines < len(customIP) {
 		routines = len(customIP)
 	}
-
-	if *detectLocation {
+	// subscribe mode
+	if len(*subscribe) > 0 {
+		subs := Subscribe(*subscribe)
+		if *detectLocation {
+			location := GetHttpLocation(subs)
+			if len(location) > 0 {
+				TargetUrl = location
+			} else {
+				TargetUrl = subs
+			}
+		} else {
+			TargetUrl = subs
+		}
+		go subscribeUpdate(*subscribe)
+	}
+	// local detect location
+	if len(*subscribe) == 0 && *detectLocation && len(*url) > 0 {
 		location := GetHttpLocation(*url)
 		if len(location) > 0 {
 			TargetUrl = location
@@ -418,8 +193,6 @@ func main() {
 		}
 
 		go RefreshHttpLocation(*url)
-	} else {
-		TargetUrl = *url
 	}
 
 	go showStat()
