@@ -1,17 +1,12 @@
 #windows版
-先下载https://github.com/maintell/webBenchmark/releases/download/0.2/webBenchmark_x64.exe
+先下载https://github.com/maintell/webBenchmark/releases
 到一个文件夹
 然后打开cmd
 cd C:\*****
 然后复制以下代码
 
 WebBenchmark.exe -c 64 -s http://剑皇链接
-复制代码
 
-
-该链接请去http://storage.googleapis.com/zongcai/jh.sh获取最新地址！！！地址都是结尾带apk的！！
-
-例如http://gf.secutre2storeapple.hbmshg.com/20211214/%E8%B4%B5%E5%A6%83%E3%90%85%E7%9B%B4%E6%92%AD_29552.apk
 # webBenchmark
 http benchmark tool to ran out your server bandwidth.
 
